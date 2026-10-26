@@ -23,7 +23,8 @@ provisioned for direct installation on a stock iPhone.
 3. Open **Settings → Privacy & Security → Developer Mode**. Look for **Pair with
    PhonePair on this iPhone** and select it. Read the six-digit code from the
    PhonePair notification, or switch back to PhonePair to read it, and enter the
-   code in Settings.
+   code in Settings. The code appears after selecting the host in Settings,
+   when the pairing handshake starts; tapping Start alone does not issue a code.
 4. Return promptly. Background time is limited. If time expires, restart the
    pairing attempt. This version uses a normal finite background task, without
    audio playback or an embedded VPN extension.
