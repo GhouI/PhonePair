@@ -1,0 +1,14 @@
+/vendor/
+/build/
+/core/target/
+*.ipa
+*.zip
+.DS_Store
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+*.mobiledevicepairing
+pairingFile.plist
+host-identity.json

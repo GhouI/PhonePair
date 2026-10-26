@@ -1,0 +1,10 @@
+PhonePair uses idevice by Jackson Coxson and contributors under the MIT License.
+Source: https://github.com/jkcoxson/idevice
+Pinned revision: 26a28f6a46b5d85a28043c2e62febfa394c8b0a6
+
+The native Bonjour advertisement approach was researched using idevice_pair and
+AirCard-iOS. PhonePair does not include AirCard's customization or file injection
+features.
+
+Rust dependency versions and sources are recorded in core/Cargo.lock.
+Additional dependency license notices are included in Dependency-Licenses.txt.
