@@ -13,7 +13,7 @@ clang -target arm64-apple-ios17.4 -isysroot "$sdk_dir" -fobjc-arc -fblocks -O2 \
 ld64.lld -arch arm64 -platform_version ios 17.4 16.5 -syslibroot "$sdk_dir" \
     -o "$app_dir/PhonePair" build/main.o core/target/aarch64-apple-ios/release/libphonepair_core.a \
     -framework UIKit -framework Foundation -framework UserNotifications -framework Security \
-    -framework CoreFoundation -framework CoreGraphics -lobjc -lSystem -liconv \
+    -framework CoreFoundation -framework CoreGraphics -framework QuartzCore -lobjc -lSystem -liconv \
     -dead_strip -adhoc_codesign
 cp ios/Info.plist "$app_dir/Info.plist"
 cp THIRD_PARTY_NOTICES.txt "$app_dir/THIRD_PARTY_NOTICES.txt"
