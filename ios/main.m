@@ -2,25 +2,31 @@
 #import <UserNotifications/UserNotifications.h>
 #import "PhonePairCore.h"
 
-typedef NS_ENUM(NSInteger, PPSection) {
-    PPSectionStatus,
-    PPSectionCode,
-    PPSectionActions,
-    PPSectionSteps,
-    PPSectionDiagnostics,
-};
-
 typedef NS_ENUM(NSInteger, PPAction) {
+    PPActionNone,
     PPActionStart,
     PPActionStop,
     PPActionVerify,
     PPActionExport,
-    PPActionRestart,
+    PPActionOpenSettings,
+};
+
+typedef NS_ENUM(NSInteger, PPProblem) {
+    PPProblemNone,
+    PPProblemUnsupportedOS,
+    PPProblemLocalNetwork,
+};
+
+// What sits at the top of the main screen: an SF Symbol, a spinner or the pairing code.
+typedef NS_ENUM(NSInteger, PPHero) {
+    PPHeroSymbol,
+    PPHeroSpinner,
+    PPHeroCode,
 };
 
 static UIColor *PPTint(void) { return [UIColor colorWithRed:0.12 green:0.53 blue:0.89 alpha:1]; }
 
-static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS limits how long it can keep running while Settings is open.";
+static NSString *const PPBackgroundHint = @"Return here promptly. Background time is limited.";
 
 #pragma mark - Activity log
 
@@ -66,32 +72,12 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
 
 @end
 
-#pragma mark - Main screen
+#pragma mark - How to Pair
 
-@interface PhonePairController : UITableViewController <NSNetServiceDelegate, UNUserNotificationCenterDelegate>
-@property(nonatomic, strong) NSNetService *service;
-@property(nonatomic, strong) NSTimer *timer;
-@property(nonatomic, copy) NSString *directory;
-@property(nonatomic, copy) NSString *lastPhase;
-@property(nonatomic, copy) NSString *lastMessage;
-@property(nonatomic, copy) NSString *lastPIN;
-@property(nonatomic, copy) NSString *statusDetail;
-@property(nonatomic, copy) NSString *statusTitleOverride;
-@property(nonatomic, copy) NSString *backgroundNote;
-@property(nonatomic, copy) NSString *renderedSignature;
-@property(nonatomic, strong) NSMutableString *diagnostics;
-@property(nonatomic, weak) PPLogViewController *logController;
-@property(nonatomic, strong) NSArray<NSNumber *> *sections;
-@property(nonatomic, strong) NSArray<NSNumber *> *actions;
-@property(nonatomic) UIBackgroundTaskIdentifier backgroundTask;
-@property(nonatomic) BOOL running;
-@property(nonatomic) BOOL hasFile;
-@property(nonatomic) BOOL verified;
-@property(nonatomic) BOOL exported;
-@property(nonatomic) BOOL copiedPIN;
+@interface PPGuideViewController : UITableViewController
 @end
 
-@implementation PhonePairController
+@implementation PPGuideViewController
 
 - (instancetype)init {
     return [super initWithStyle:UITableViewStyleInsetGrouped];
@@ -99,13 +85,115 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"PhonePair";
-    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeAlways;
+    self.title = @"How to Pair";
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(done)];
+    self.tableView.allowsSelection = NO;
     [self.tableView registerClass:UITableViewCell.class forCellReuseIdentifier:@"cell"];
+}
+
+- (void)done {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (NSArray<NSArray<NSString *> *> *)steps {
+    return @[
+        @[@"Start Pairing", @"Join Wi‑Fi, then allow Local Network and Notifications."],
+        @[@"Open Developer Mode", @"In Settings, go to Privacy & Security › Developer Mode and tap “Pair with PhonePair on this iPhone.”"],
+        @[@"Enter the Code", @"Type the six-digit code from PhonePair or its notification, then return promptly."],
+        @[@"Verify", @"Connect LocalDevVPN, then tap Verify with LocalDevVPN."],
+        @[@"Import in StikDebug", @"Export the pairing file and import it in StikDebug."],
+    ];
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return 2;
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return section == 0 ? (NSInteger)self.steps.count : 1;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    return section == 1 ? @"About" : nil;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 0) return @"PhonePair creates a new pairing identity on this iPhone. It doesn’t read or replace your existing StikDebug pairing.";
+    return @"Diagnostics record steps and errors, never keys or pairing codes. Pairing keys stay on this iPhone unless you export them.";
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell" forIndexPath:indexPath];
+    UIListContentConfiguration *content;
+    if (indexPath.section == 0) {
+        NSArray<NSString *> *step = self.steps[indexPath.row];
+        content = UIListContentConfiguration.subtitleCellConfiguration;
+        content.text = step[0];
+        content.secondaryText = step[1];
+        content.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+        content.textToSecondaryTextVerticalPadding = 2;
+        NSString *symbol = [NSString stringWithFormat:@"%ld.circle", (long)indexPath.row + 1];
+        content.image = [UIImage systemImageNamed:symbol withConfiguration:[UIImageSymbolConfiguration configurationWithTextStyle:UIFontTextStyleTitle3]];
+        content.imageProperties.tintColor = PPTint();
+        cell.accessibilityLabel = [NSString stringWithFormat:@"Step %ld, %@. %@", (long)indexPath.row + 1, step[0], step[1]];
+    } else {
+        NSString *version = NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"0.1.0";
+        content = UIListContentConfiguration.valueCellConfiguration;
+        content.text = @"Version";
+        content.secondaryText = [NSString stringWithFormat:@"%@ (Experimental)", version];
+        cell.accessibilityLabel = nil;
+    }
+    cell.contentConfiguration = content;
+    return cell;
+}
+
+@end
+
+#pragma mark - Main screen
+
+@interface PhonePairController : UIViewController <NSNetServiceDelegate, UNUserNotificationCenterDelegate>
+@property(nonatomic, strong) NSNetService *service;
+@property(nonatomic, strong) NSTimer *timer;
+@property(nonatomic, copy) NSString *directory;
+@property(nonatomic, copy) NSString *lastPhase;
+@property(nonatomic, copy) NSString *lastMessage;
+@property(nonatomic, copy) NSString *lastPIN;
+@property(nonatomic, copy) NSString *backgroundNote;
+@property(nonatomic, strong) NSMutableString *diagnostics;
+@property(nonatomic, weak) PPLogViewController *logController;
+@property(nonatomic) UIBackgroundTaskIdentifier backgroundTask;
+@property(nonatomic) BOOL running;
+@property(nonatomic) BOOL hasFile;
+@property(nonatomic) BOOL published;
+@property(nonatomic) BOOL verifyRequested;
+@property(nonatomic) BOOL verified;
+@property(nonatomic) BOOL exported;
+@property(nonatomic) BOOL copiedPIN;
+@property(nonatomic) PPProblem problem;
+
+@property(nonatomic, strong) UIScrollView *scrollView;
+@property(nonatomic, strong) UIImageView *symbolView;
+@property(nonatomic, strong) UIActivityIndicatorView *spinner;
+@property(nonatomic, strong) UILabel *codeLabel;
+@property(nonatomic, strong) UILabel *headlineLabel;
+@property(nonatomic, strong) UILabel *messageLabel;
+@property(nonatomic, strong) UIButton *codeCopyButton;
+@property(nonatomic, strong) UILabel *footnoteLabel;
+@property(nonatomic, strong) UIButton *primaryButton;
+@property(nonatomic, strong) UIButton *secondaryButton;
+@property(nonatomic, copy) NSArray *rendered;
+@property(nonatomic, copy) NSString *renderedState;
+@property(nonatomic, copy) NSArray *renderedButtons;
+@end
+
+@implementation PhonePairController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"PhonePair";
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.backgroundTask = UIBackgroundTaskInvalid;
     self.backgroundNote = PPBackgroundHint;
-    self.sections = @[];
-    self.actions = @[];
     self.diagnostics = [NSMutableString stringWithString:@"PhonePair 0.1.0 experimental\n"];
     [self.diagnostics appendFormat:@"iOS %@\n", UIDevice.currentDevice.systemVersion];
     NSURL *support = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
@@ -117,6 +205,8 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
     NSURL *directoryURL = [NSURL fileURLWithPath:self.directory];
     [directoryURL setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
 
+    [self buildInterface];
+
     UNUserNotificationCenter.currentNotificationCenter.delegate = self;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(enterBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(enterForeground) name:UIApplicationWillEnterForegroundNotification object:nil];
@@ -124,206 +214,208 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
     [self poll];
 }
 
-#pragma mark - Derived state
+#pragma mark - Interface
 
-- (BOOL)pairingActive {
-    return self.running && ([self.lastPhase isEqualToString:@"listening"] || [self.lastPhase isEqualToString:@"pin"]);
+- (UILabel *)labelWithFont:(UIFont *)font color:(UIColor *)color {
+    UILabel *label = [UILabel new];
+    label.font = font;
+    label.textColor = color;
+    label.textAlignment = NSTextAlignmentCenter;
+    label.numberOfLines = 0;
+    label.adjustsFontForContentSizeCategory = YES;
+    return label;
 }
 
-- (NSInteger)currentStep {
-    NSString *phase = self.lastPhase;
-    if (self.exported) return 5;
-    if (self.verified) return 4;
-    if ([phase isEqualToString:@"verifying"]) return 3;
-    if ([phase isEqualToString:@"pin"]) return 2;
-    if (self.running) return 1;
-    if (self.hasFile) return 3;
-    return 0;
+- (UIButton *)buttonWithConfiguration:(UIButtonConfiguration *)config textStyle:(UIFontTextStyle)style action:(SEL)action {
+    config.titleTextAttributesTransformer = ^NSDictionary<NSAttributedStringKey, id> *(NSDictionary<NSAttributedStringKey, id> *attributes) {
+        NSMutableDictionary<NSAttributedStringKey, id> *updated = [attributes mutableCopy];
+        updated[NSFontAttributeName] = [UIFont preferredFontForTextStyle:style];
+        return updated;
+    };
+    UIButton *button = [UIButton buttonWithConfiguration:config primaryAction:nil];
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return button;
 }
 
-// Returns title, symbol name (nil while busy) and symbol colour for the status row.
-- (NSArray *)statusAppearance {
-    NSString *phase = self.lastPhase ?: @"idle";
-    UIColor *tint = PPTint();
-    if (self.statusTitleOverride) return @[self.statusTitleOverride, @"exclamationmark.triangle.fill", UIColor.systemOrangeColor];
-    if (self.exported) return @[@"Pairing File Exported", @"checkmark.circle.fill", UIColor.systemGreenColor];
-    if ([phase isEqualToString:@"listening"]) return @[@"Waiting for Settings…", NSNull.null, tint];
-    if ([phase isEqualToString:@"pin"]) return @[@"Enter the Code in Settings", @"lock.circle.fill", tint];
-    if ([phase isEqualToString:@"paired"]) return @[@"Paired", @"checkmark.circle.fill", tint];
-    if ([phase isEqualToString:@"verifying"]) return @[@"Verifying…", NSNull.null, tint];
-    if ([phase isEqualToString:@"verified"]) return @[@"Verified", @"checkmark.circle.fill", UIColor.systemGreenColor];
-    if ([phase isEqualToString:@"error"]) return @[@"Couldn’t Complete", @"exclamationmark.triangle.fill", UIColor.systemOrangeColor];
-    if ([phase isEqualToString:@"stopped"]) return @[@"Stopped", @"stop.circle.fill", UIColor.systemGrayColor];
-    if (self.hasFile) return @[@"Pairing File Saved", @"doc.circle.fill", tint];
-    return @[@"Ready to Pair", @"iphone.radiowaves.left.and.right.circle.fill", tint];
-}
+- (void)buildInterface {
+    self.view.backgroundColor = UIColor.systemBackgroundColor;
+    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
 
-- (void)refresh {
-    NSMutableArray *sections = [NSMutableArray arrayWithObject:@(PPSectionStatus)];
-    if (self.pairingActive) [sections addObject:@(PPSectionCode)];
-    [sections addObjectsFromArray:@[@(PPSectionActions), @(PPSectionSteps), @(PPSectionDiagnostics)]];
+    __weak PhonePairController *weakSelf = self;
+    UIDeferredMenuElement *menuItems = [UIDeferredMenuElement elementWithUncachedProvider:^(void (^completion)(NSArray<UIMenuElement *> *)) {
+        completion([weakSelf menuElements] ?: @[]);
+    }];
+    UIBarButtonItem *more = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"] menu:[UIMenu menuWithChildren:@[menuItems]]];
+    more.accessibilityLabel = @"More";
+    self.navigationItem.rightBarButtonItem = more;
 
-    NSArray *actions;
-    if (self.running) actions = @[@(PPActionStop)];
-    else if (self.hasFile) actions = @[@(PPActionVerify), @(PPActionExport), @(PPActionRestart)];
-    else actions = @[@(PPActionStart)];
-
-    NSString *signature = [NSString stringWithFormat:@"%@|%@|%@|%@|%@|%d%d%d%d%d|%ld|%@",
-        self.lastPhase, self.statusDetail, self.statusTitleOverride, self.lastPIN, self.backgroundNote,
-        self.running, self.hasFile, self.verified, self.exported, self.copiedPIN, (long)self.currentStep, sections];
-    if ([signature isEqualToString:self.renderedSignature]) return;
-    BOOL structural = ![sections isEqualToArray:self.sections] || ![actions isEqualToArray:self.actions];
-    self.renderedSignature = signature;
-    self.sections = sections;
-    self.actions = actions;
-    if (structural && self.view.window) {
-        [UIView transitionWithView:self.tableView duration:0.2 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
-            [self.tableView reloadData];
-        } completion:nil];
-    } else {
-        [self.tableView reloadData];
+    // Top of the content: one of a symbol, a spinner or the pairing code, all centred in the same slot.
+    self.symbolView = [UIImageView new];
+    self.symbolView.contentMode = UIViewContentModeCenter;
+    self.symbolView.preferredSymbolConfiguration = [UIImageSymbolConfiguration configurationWithPointSize:60 weight:UIImageSymbolWeightRegular];
+    self.spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
+    self.spinner.hidesWhenStopped = YES;
+    UIFont *codeFont = [UIFont monospacedDigitSystemFontOfSize:56 weight:UIFontWeightMedium];
+    self.codeLabel = [self labelWithFont:[[UIFontMetrics metricsForTextStyle:UIFontTextStyleLargeTitle] scaledFontForFont:codeFont maximumPointSize:96] color:UIColor.labelColor];
+    self.codeLabel.numberOfLines = 1;
+    self.codeLabel.adjustsFontSizeToFitWidth = YES;
+    self.codeLabel.minimumScaleFactor = 0.5;
+    self.codeLabel.userInteractionEnabled = YES;
+    [self.codeLabel addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(copyPIN)]];
+    UIView *hero = [UIView new];
+    for (UIView *view in @[self.symbolView, self.spinner, self.codeLabel]) {
+        view.translatesAutoresizingMaskIntoConstraints = NO;
+        [hero addSubview:view];
+        [NSLayoutConstraint activateConstraints:@[
+            [view.centerXAnchor constraintEqualToAnchor:hero.centerXAnchor],
+            [view.centerYAnchor constraintEqualToAnchor:hero.centerYAnchor],
+            [view.topAnchor constraintGreaterThanOrEqualToAnchor:hero.topAnchor],
+            [view.leadingAnchor constraintGreaterThanOrEqualToAnchor:hero.leadingAnchor],
+        ]];
     }
+    NSLayoutConstraint *heroHeight = [hero.heightAnchor constraintEqualToConstant:72];
+    heroHeight.priority = UILayoutPriorityDefaultLow;
+    [NSLayoutConstraint activateConstraints:@[heroHeight, [hero.heightAnchor constraintGreaterThanOrEqualToConstant:72]]];
+
+    UIFont *headlineFont = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleTitle1] scaledFontForFont:[UIFont systemFontOfSize:28 weight:UIFontWeightBold]];
+    self.headlineLabel = [self labelWithFont:headlineFont color:UIColor.labelColor];
+    self.headlineLabel.accessibilityTraits |= UIAccessibilityTraitHeader;
+    self.messageLabel = [self labelWithFont:[UIFont preferredFontForTextStyle:UIFontTextStyleBody] color:UIColor.secondaryLabelColor];
+
+    UIButtonConfiguration *copyConfig = UIButtonConfiguration.plainButtonConfiguration;
+    copyConfig.imagePadding = 6;
+    copyConfig.preferredSymbolConfigurationForImage = [UIImageSymbolConfiguration configurationWithTextStyle:UIFontTextStyleSubheadline];
+    self.codeCopyButton = [self buttonWithConfiguration:copyConfig textStyle:UIFontTextStyleSubheadline action:@selector(copyPIN)];
+
+    UIStackView *content = [[UIStackView alloc] initWithArrangedSubviews:@[hero, self.headlineLabel, self.messageLabel, self.codeCopyButton]];
+    content.axis = UILayoutConstraintAxisVertical;
+    content.alignment = UIStackViewAlignmentCenter;
+    [content setCustomSpacing:16 afterView:hero];
+    [content setCustomSpacing:8 afterView:self.headlineLabel];
+    [content setCustomSpacing:10 afterView:self.messageLabel];
+    content.translatesAutoresizingMaskIntoConstraints = NO;
+
+    // The bottom tray holds the background-time note and up to two buttons.
+    self.footnoteLabel = [self labelWithFont:[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote] color:UIColor.secondaryLabelColor];
+    UIButtonConfiguration *primaryConfig = UIButtonConfiguration.filledButtonConfiguration;
+    primaryConfig.cornerStyle = UIButtonConfigurationCornerStyleLarge;
+    primaryConfig.contentInsets = NSDirectionalEdgeInsetsMake(15, 20, 15, 20);
+    self.primaryButton = [self buttonWithConfiguration:primaryConfig textStyle:UIFontTextStyleHeadline action:@selector(buttonTapped:)];
+    UIButtonConfiguration *secondaryConfig = UIButtonConfiguration.plainButtonConfiguration;
+    secondaryConfig.contentInsets = NSDirectionalEdgeInsetsMake(12, 20, 12, 20);
+    self.secondaryButton = [self buttonWithConfiguration:secondaryConfig textStyle:UIFontTextStyleBody action:@selector(buttonTapped:)];
+    UIStackView *tray = [[UIStackView alloc] initWithArrangedSubviews:@[self.footnoteLabel, self.primaryButton, self.secondaryButton]];
+    tray.axis = UILayoutConstraintAxisVertical;
+    tray.spacing = 6;
+    [tray setCustomSpacing:16 afterView:self.footnoteLabel];
+    tray.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:tray];
+
+    // Content scrolls only when Dynamic Type makes it taller than the screen; otherwise it sits centred.
+    self.scrollView = [UIScrollView new];
+    self.scrollView.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+    self.scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.scrollView];
+    [self setContentScrollView:self.scrollView forEdge:NSDirectionalRectEdgeTop];
+    UIView *canvas = [UIView new];
+    canvas.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.scrollView addSubview:canvas];
+    [canvas addSubview:content];
+
+    UILayoutGuide *frame = self.scrollView.frameLayoutGuide, *scrolled = self.scrollView.contentLayoutGuide;
+    NSLayoutConstraint *canvasHeight = [canvas.heightAnchor constraintEqualToAnchor:frame.heightAnchor];
+    canvasHeight.priority = 700;
+    NSLayoutConstraint *centred = [content.centerYAnchor constraintEqualToAnchor:canvas.centerYAnchor constant:-32];
+    centred.priority = 500;
+    NSLayoutConstraint *contentWidth = [content.widthAnchor constraintEqualToAnchor:safe.widthAnchor constant:-64];
+    contentWidth.priority = UILayoutPriorityDefaultHigh;
+    NSLayoutConstraint *trayWidth = [tray.widthAnchor constraintEqualToAnchor:safe.widthAnchor constant:-48];
+    trayWidth.priority = UILayoutPriorityDefaultHigh;
+    [NSLayoutConstraint activateConstraints:@[
+        [tray.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-12],
+        [tray.centerXAnchor constraintEqualToAnchor:safe.centerXAnchor],
+        [tray.leadingAnchor constraintGreaterThanOrEqualToAnchor:safe.leadingAnchor constant:24],
+        [tray.widthAnchor constraintLessThanOrEqualToConstant:420],
+        trayWidth,
+
+        [self.scrollView.topAnchor constraintEqualToAnchor:safe.topAnchor],
+        [self.scrollView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.scrollView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.scrollView.bottomAnchor constraintEqualToAnchor:tray.topAnchor constant:-8],
+
+        [canvas.topAnchor constraintEqualToAnchor:scrolled.topAnchor],
+        [canvas.bottomAnchor constraintEqualToAnchor:scrolled.bottomAnchor],
+        [canvas.leadingAnchor constraintEqualToAnchor:scrolled.leadingAnchor],
+        [canvas.trailingAnchor constraintEqualToAnchor:scrolled.trailingAnchor],
+        [canvas.widthAnchor constraintEqualToAnchor:frame.widthAnchor],
+        [canvas.heightAnchor constraintGreaterThanOrEqualToAnchor:frame.heightAnchor],
+        canvasHeight,
+
+        [content.centerXAnchor constraintEqualToAnchor:safe.centerXAnchor],
+        [content.topAnchor constraintGreaterThanOrEqualToAnchor:canvas.topAnchor constant:16],
+        [content.bottomAnchor constraintLessThanOrEqualToAnchor:canvas.bottomAnchor constant:-16],
+        [content.leadingAnchor constraintGreaterThanOrEqualToAnchor:safe.leadingAnchor constant:32],
+        [content.widthAnchor constraintLessThanOrEqualToConstant:400],
+        contentWidth,
+        centred,
+        [hero.widthAnchor constraintEqualToAnchor:content.widthAnchor],
+        [self.headlineLabel.widthAnchor constraintEqualToAnchor:content.widthAnchor],
+        [self.messageLabel.widthAnchor constraintEqualToAnchor:content.widthAnchor],
+    ]];
 }
 
-#pragma mark - Table
-
-- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
-    return self.sections.count;
-}
-
-- (PPSection)kind:(NSInteger)section {
-    return self.sections[section].integerValue;
-}
-
-- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    switch ([self kind:section]) {
-        case PPSectionActions: return self.actions.count;
-        case PPSectionSteps: return 5;
-        default: return 1;
+- (NSArray<UIMenuElement *> *)menuElements {
+    __weak PhonePairController *weakSelf = self;
+    NSMutableArray<UIMenuElement *> *elements = [NSMutableArray new];
+    // With a saved file, offer the file actions that aren't already buttons on screen, so none is ever out of reach.
+    if (!self.running && self.hasFile) {
+        NSArray *onScreen = self.renderedButtons.count == 4 ? @[self.renderedButtons[0], self.renderedButtons[2]] : @[];
+        NSMutableArray<UIMenuElement *> *fileActions = [NSMutableArray new];
+        if (![onScreen containsObject:@(PPActionVerify)]) {
+            [fileActions addObject:[UIAction actionWithTitle:@"Verify with LocalDevVPN" image:[UIImage systemImageNamed:@"checkmark.shield"] identifier:nil handler:^(__kindof UIAction *action) {
+                [weakSelf verifyPairing];
+            }]];
+        }
+        if (![onScreen containsObject:@(PPActionExport)]) {
+            [fileActions addObject:[UIAction actionWithTitle:@"Export Pairing File" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil handler:^(__kindof UIAction *action) {
+                [weakSelf exportPairingFrom:nil];
+            }]];
+        }
+        if (![onScreen containsObject:@(PPActionStart)]) {
+            [fileActions addObject:[UIAction actionWithTitle:@"Start New Pairing" image:[UIImage systemImageNamed:@"arrow.clockwise"] identifier:nil handler:^(__kindof UIAction *action) {
+                [weakSelf startPairing];
+            }]];
+        }
+        if (fileActions.count) [elements addObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:fileActions]];
     }
+    [elements addObject:[UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:@[
+        [UIAction actionWithTitle:@"How to Pair" image:[UIImage systemImageNamed:@"questionmark.circle"] identifier:nil handler:^(__kindof UIAction *action) {
+            [weakSelf showGuide];
+        }],
+        [UIAction actionWithTitle:@"Activity Log" image:[UIImage systemImageNamed:@"doc.text"] identifier:nil handler:^(__kindof UIAction *action) {
+            [weakSelf showLog];
+        }],
+    ]]];
+    return elements;
 }
 
-- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
-    switch ([self kind:section]) {
-        case PPSectionCode: return @"Pairing Code";
-        case PPSectionSteps: return @"How to Pair";
-        case PPSectionDiagnostics: return @"Diagnostics";
-        default: return nil;
-    }
+- (void)showGuide {
+    UINavigationController *guide = [[UINavigationController alloc] initWithRootViewController:[PPGuideViewController new]];
+    [self presentViewController:guide animated:YES completion:nil];
 }
 
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    switch ([self kind:section]) {
-        case PPSectionCode: {
-            NSString *hint = self.copiedPIN ? @"Copied."
-                : self.lastPIN.length ? @"Enter this code when Settings asks for it. It’s also sent as a notification. Tap the code to copy it."
-                : @"The code appears after you select “Pair with PhonePair on this iPhone” in Developer Mode settings.";
-            return [NSString stringWithFormat:@"%@\n\n%@", hint, self.backgroundNote];
-        }
-        case PPSectionActions:
-            if (self.running) return nil;
-            if (self.verified || self.exported) return @"Import the exported file in StikDebug. Your existing StikDebug pairing isn’t changed.";
-            if (self.hasFile) return @"Connect LocalDevVPN before verifying. You can also export without verifying.";
-            return @"PhonePair creates a new pairing identity on this iPhone. It doesn’t read or replace your existing pairing file.";
-        case PPSectionDiagnostics:
-            return @"Diagnostics record steps and errors, never keys or pairing codes. Pairing keys stay on this iPhone unless you export them.\n\nPhonePair 0.1.0 · Experimental · Requires iOS 27";
-        default:
-            return nil;
-    }
+- (void)showLog {
+    PPLogViewController *log = [PPLogViewController new];
+    log.text = self.diagnostics;
+    self.logController = log;
+    [self.navigationController pushViewController:log animated:YES];
 }
 
-- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"cell" forIndexPath:indexPath];
-    cell.accessoryView = nil;
-    cell.accessoryType = UITableViewCellAccessoryNone;
-    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-    cell.accessibilityLabel = nil;
-    UIListContentConfiguration *content;
+#pragma mark - State
 
-    switch ([self kind:indexPath.section]) {
-        case PPSectionStatus: {
-            NSArray *appearance = [self statusAppearance];
-            content = UIListContentConfiguration.subtitleCellConfiguration;
-            content.text = appearance[0];
-            content.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
-            content.secondaryText = self.statusDetail;
-            content.secondaryTextProperties.color = UIColor.secondaryLabelColor;
-            content.textToSecondaryTextVerticalPadding = 3;
-            content.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(12, 0, 12, 0);
-            UIImageSymbolConfiguration *large = [UIImageSymbolConfiguration configurationWithTextStyle:UIFontTextStyleTitle2];
-            if ([appearance[1] isKindOfClass:NSString.class]) {
-                content.image = [UIImage systemImageNamed:appearance[1] withConfiguration:large];
-                content.imageProperties.tintColor = appearance[2];
-            } else {
-                UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-                [spinner startAnimating];
-                cell.accessoryView = spinner;
-            }
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-            break;
-        }
-        case PPSectionCode: {
-            content = UIListContentConfiguration.cellConfiguration;
-            BOOL has = self.lastPIN.length == 6;
-            content.text = has ? [NSString stringWithFormat:@"%@ %@", [self.lastPIN substringToIndex:3], [self.lastPIN substringFromIndex:3]] : @"––– –––";
-            content.textProperties.font = [UIFont monospacedDigitSystemFontOfSize:44 weight:UIFontWeightMedium];
-            content.textProperties.color = has ? UIColor.labelColor : UIColor.tertiaryLabelColor;
-            content.textProperties.alignment = UIListContentTextAlignmentCenter;
-            content.directionalLayoutMargins = NSDirectionalEdgeInsetsMake(14, 0, 14, 0);
-            cell.selectionStyle = has ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleNone;
-            cell.accessibilityLabel = has ? [NSString stringWithFormat:@"Pairing code %@", [self spokenPIN]] : @"No pairing code yet";
-            break;
-        }
-        case PPSectionActions: {
-            content = UIListContentConfiguration.cellConfiguration;
-            content.textProperties.color = PPTint();
-            switch ((PPAction)self.actions[indexPath.row].integerValue) {
-                case PPActionStart: content.text = @"Start Pairing"; break;
-                case PPActionStop:
-                    content.text = [self.lastPhase isEqualToString:@"verifying"] ? @"Stop Verifying" : @"Stop Pairing";
-                    content.textProperties.color = UIColor.systemRedColor;
-                    break;
-                case PPActionVerify: content.text = @"Verify with LocalDevVPN"; break;
-                case PPActionExport: content.text = @"Export Pairing File…"; break;
-                case PPActionRestart: content.text = @"Start New Pairing"; break;
-            }
-            break;
-        }
-        case PPSectionSteps: {
-            NSArray<NSArray<NSString *> *> *steps = @[
-                @[@"Start Pairing", @"Join Wi‑Fi, then allow Local Network and Notifications."],
-                @[@"Select PhonePair in Settings", @"Privacy & Security › Developer Mode › Pair with PhonePair on this iPhone."],
-                @[@"Enter the Code", @"Type the six-digit code shown here or in the notification."],
-                @[@"Verify", @"Connect LocalDevVPN, then return here and tap Verify."],
-                @[@"Export to StikDebug", @"Save the file, then import it in StikDebug."],
-            ];
-            NSInteger current = self.currentStep, row = indexPath.row;
-            content = UIListContentConfiguration.subtitleCellConfiguration;
-            content.text = steps[row][0];
-            content.secondaryText = steps[row][1];
-            content.secondaryTextProperties.color = UIColor.secondaryLabelColor;
-            content.textToSecondaryTextVerticalPadding = 2;
-            NSString *symbol;
-            UIColor *color;
-            if (row < current) { symbol = @"checkmark.circle.fill"; color = UIColor.systemGreenColor; }
-            else if (row == current) { symbol = [NSString stringWithFormat:@"%ld.circle.fill", (long)row + 1]; color = PPTint(); }
-            else { symbol = [NSString stringWithFormat:@"%ld.circle", (long)row + 1]; color = UIColor.tertiaryLabelColor; }
-            content.image = [UIImage systemImageNamed:symbol withConfiguration:[UIImageSymbolConfiguration configurationWithTextStyle:UIFontTextStyleTitle3]];
-            content.imageProperties.tintColor = color;
-            cell.selectionStyle = UITableViewCellSelectionStyleNone;
-            cell.accessibilityLabel = [NSString stringWithFormat:@"Step %ld, %@%@. %@", (long)row + 1, steps[row][0],
-                row < current ? @", done" : row == current ? @", current" : @"", steps[row][1]];
-            break;
-        }
-        case PPSectionDiagnostics: {
-            content = UIListContentConfiguration.valueCellConfiguration;
-            content.text = @"Activity Log";
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-            break;
-        }
-    }
-    cell.contentConfiguration = content;
-    return cell;
+- (NSString *)formattedPIN {
+    if (self.lastPIN.length != 6) return self.lastPIN ?: @"";
+    return [NSString stringWithFormat:@"%@ %@", [self.lastPIN substringToIndex:3], [self.lastPIN substringFromIndex:3]];
 }
 
 - (NSString *)spokenPIN {
@@ -332,36 +424,168 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
     return [digits componentsJoinedByString:@" "];
 }
 
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
-    switch ([self kind:indexPath.section]) {
-        case PPSectionCode:
-            if (self.lastPIN.length) {
-                UIPasteboard.generalPasteboard.string = self.lastPIN;
-                self.copiedPIN = YES;
-                [self refresh];
-            }
-            break;
-        case PPSectionActions:
-            switch ((PPAction)self.actions[indexPath.row].integerValue) {
-                case PPActionStart:
-                case PPActionRestart: [self startPairing]; break;
-                case PPActionStop: [self stopPairing]; break;
-                case PPActionVerify: [self verifyPairing]; break;
-                case PPActionExport: [self exportPairingFrom:cell]; break;
-            }
-            break;
-        case PPSectionDiagnostics: {
-            PPLogViewController *log = [PPLogViewController new];
-            log.text = self.diagnostics;
-            self.logController = log;
-            [self.navigationController pushViewController:log animated:YES];
-            break;
+// Works out what the main screen shows. Called on every poll; the views are only touched when something changed.
+- (void)refresh {
+    if (!self.isViewLoaded) return;
+    NSString *phase = self.lastPhase ?: @"idle";
+    NSString *state, *symbol = @"", *title, *message = @"", *footnote = @"";
+    NSString *primaryTitle = @"", *secondaryTitle = @"";
+    PPAction primary = PPActionNone, secondary = PPActionNone;
+    PPHero hero = PPHeroSymbol;
+    UIColor *color = PPTint();
+
+    if (self.problem == PPProblemUnsupportedOS) {
+        state = @"unsupported";
+        symbol = @"exclamationmark.triangle.fill";
+        color = UIColor.systemOrangeColor;
+        title = @"Requires iOS 27";
+        message = @"PhonePair needs iOS 27 or later.";
+    } else if (self.problem == PPProblemLocalNetwork) {
+        state = @"local-network";
+        symbol = @"wifi.exclamationmark";
+        color = UIColor.systemOrangeColor;
+        title = @"Local Network Unavailable";
+        message = @"Allow Local Network for PhonePair in Settings, then try again.";
+        if (!self.running) {
+            primary = PPActionStart; primaryTitle = @"Try Again";
+            secondary = PPActionOpenSettings; secondaryTitle = @"Open Settings";
         }
-        default:
-            break;
+    } else if (self.running && [phase isEqualToString:@"verifying"]) {
+        state = @"verifying";
+        hero = PPHeroSpinner;
+        title = @"Verifying…";
+        message = @"Checking the pairing through LocalDevVPN.";
+        secondary = PPActionStop; secondaryTitle = @"Stop Verifying";
+    } else if (self.running) {
+        if ([phase isEqualToString:@"pin"] && self.lastPIN.length) {
+            state = @"pin";
+            hero = PPHeroCode;
+            title = @"Enter Code in Settings";
+            message = @"It’s also shown in a notification.";
+        } else if (self.published || [phase isEqualToString:@"connected"] || [phase isEqualToString:@"pin"]) {
+            state = @"settings";
+            symbol = @"gear";
+            title = @"Continue in Settings";
+            message = @"Go to Privacy & Security › Developer Mode and tap “Pair with PhonePair on this iPhone.”";
+        } else {
+            state = @"starting";
+            hero = PPHeroSpinner;
+            title = @"Starting…";
+        }
+        footnote = self.backgroundNote ?: @"";
+        secondary = PPActionStop; secondaryTitle = @"Stop Pairing";
+    } else if (self.exported) {
+        state = @"exported";
+        symbol = @"checkmark.circle.fill";
+        color = UIColor.systemGreenColor;
+        title = @"Pairing File Exported";
+        message = @"Import it in StikDebug, then try enabling JIT.";
+        secondary = PPActionExport; secondaryTitle = @"Export Again";
+    } else if ([phase isEqualToString:@"error"]) {
+        BOOL verifyFailed = self.verifyRequested && self.hasFile;
+        state = verifyFailed ? @"verify-error" : @"pair-error";
+        symbol = @"exclamationmark.triangle.fill";
+        color = UIColor.systemOrangeColor;
+        title = verifyFailed ? @"Couldn’t Verify" : @"Couldn’t Pair";
+        message = self.lastMessage.length ? self.lastMessage : @"See the activity log for details.";
+        primary = verifyFailed ? PPActionVerify : PPActionStart; primaryTitle = @"Try Again";
+        if (verifyFailed) { secondary = PPActionExport; secondaryTitle = @"Export Pairing File"; }
+    } else if (self.verified) {
+        state = @"verified";
+        symbol = @"checkmark.circle.fill";
+        color = UIColor.systemGreenColor;
+        title = @"Pairing Verified";
+        message = @"Export the pairing file, then import it in StikDebug.";
+        primary = PPActionExport; primaryTitle = @"Export Pairing File";
+    } else if (self.hasFile) {
+        state = @"paired";
+        symbol = @"checkmark.circle";
+        title = @"Paired";
+        message = @"Connect LocalDevVPN, then verify the pairing.";
+        primary = PPActionVerify; primaryTitle = @"Verify with LocalDevVPN";
+        secondary = PPActionExport; secondaryTitle = @"Export Pairing File";
+    } else if ([phase isEqualToString:@"stopped"]) {
+        state = @"stopped";
+        symbol = @"stop.circle";
+        color = UIColor.systemGrayColor;
+        title = @"Pairing Stopped";
+        message = @"Start again when you’re ready.";
+        primary = PPActionStart; primaryTitle = @"Start Pairing";
+    } else {
+        state = @"ready";
+        symbol = @"iphone.radiowaves.left.and.right";
+        title = @"Pair This iPhone";
+        message = @"Connect to Wi‑Fi, then create a pairing file for StikDebug.";
+        primary = PPActionStart; primaryTitle = @"Start Pairing";
     }
+
+    NSString *code = hero == PPHeroCode ? [self formattedPIN] : @"";
+    NSArray *buttons = @[@(primary), primaryTitle, @(secondary), secondaryTitle];
+    NSArray *signature = @[state, @(hero), symbol, title, message, footnote, code, @(self.copiedPIN), buttons];
+    if ([signature isEqualToArray:self.rendered]) return;
+    BOOL structural = self.renderedState && (![state isEqualToString:self.renderedState] || ![buttons isEqualToArray:self.renderedButtons]);
+    BOOL announce = self.renderedState && ![state isEqualToString:self.renderedState];
+    self.rendered = signature;
+    self.renderedState = state;
+    self.renderedButtons = buttons;
+
+    void (^apply)(void) = ^{
+        self.symbolView.hidden = hero != PPHeroSymbol;
+        self.symbolView.image = symbol.length ? [UIImage systemImageNamed:symbol] : nil;
+        self.symbolView.tintColor = color;
+        if (hero == PPHeroSpinner) [self.spinner startAnimating];
+        else [self.spinner stopAnimating];
+        self.codeLabel.hidden = hero != PPHeroCode;
+        self.codeLabel.text = code;
+        self.codeLabel.accessibilityLabel = code.length ? [NSString stringWithFormat:@"Pairing code %@", [self spokenPIN]] : nil;
+        self.headlineLabel.text = title;
+        self.messageLabel.text = message;
+        self.messageLabel.hidden = message.length == 0;
+        UIButtonConfiguration *copyConfig = self.codeCopyButton.configuration;
+        copyConfig.title = self.copiedPIN ? @"Copied" : @"Copy Code";
+        copyConfig.image = [UIImage systemImageNamed:self.copiedPIN ? @"checkmark" : @"doc.on.doc"];
+        self.codeCopyButton.configuration = copyConfig;
+        self.codeCopyButton.hidden = hero != PPHeroCode;
+        self.footnoteLabel.text = footnote;
+        self.footnoteLabel.hidden = footnote.length == 0;
+        [self setButton:self.primaryButton action:primary title:primaryTitle];
+        [self setButton:self.secondaryButton action:secondary title:secondaryTitle];
+        [self.view layoutIfNeeded];
+    };
+    if (structural && self.view.window) {
+        [UIView transitionWithView:self.view duration:0.25 options:UIViewAnimationOptionTransitionCrossDissolve|UIViewAnimationOptionAllowUserInteraction animations:apply completion:nil];
+    } else {
+        apply();
+    }
+    if (announce && self.view.window) UIAccessibilityPostNotification(UIAccessibilityLayoutChangedNotification, self.headlineLabel);
+}
+
+- (void)setButton:(UIButton *)button action:(PPAction)action title:(NSString *)title {
+    button.tag = action;
+    button.hidden = action == PPActionNone;
+    UIButtonConfiguration *config = button.configuration;
+    config.title = title;
+    button.configuration = config;
+}
+
+- (void)buttonTapped:(UIButton *)sender {
+    switch ((PPAction)sender.tag) {
+        case PPActionStart: [self startPairing]; break;
+        case PPActionStop: [self stopPairing]; break;
+        case PPActionVerify: [self verifyPairing]; break;
+        case PPActionExport: [self exportPairingFrom:sender]; break;
+        case PPActionOpenSettings:
+            [UIApplication.sharedApplication openURL:[NSURL URLWithString:UIApplicationOpenSettingsURLString] options:@{} completionHandler:nil];
+            break;
+        case PPActionNone: break;
+    }
+}
+
+- (void)copyPIN {
+    if (!self.lastPIN.length || self.codeLabel.hidden) return;
+    UIPasteboard.generalPasteboard.string = self.lastPIN;
+    self.copiedPIN = YES;
+    [self refresh];
 }
 
 #pragma mark - Pairing
@@ -386,8 +610,7 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
 
 - (void)startPairing {
     if (NSProcessInfo.processInfo.operatingSystemVersion.majorVersion < 27) {
-        self.statusTitleOverride = @"Requires iOS 27";
-        self.statusDetail = @"This experiment requires iOS 27 or newer.";
+        self.problem = PPProblemUnsupportedOS;
         [self refresh];
         return;
     }
@@ -396,7 +619,9 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
     self.lastPhase = nil;
     self.lastMessage = nil;
     self.lastPIN = nil;
-    self.statusTitleOverride = nil;
+    self.problem = PPProblemNone;
+    self.published = NO;
+    self.verifyRequested = NO;
     self.verified = NO;
     self.exported = NO;
     self.copiedPIN = NO;
@@ -425,10 +650,8 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
 - (void)netServiceDidPublish:(NSNetService *)sender {
     if (sender != self.service) return;
     [self appendLog:@"Bonjour publication succeeded. Look for PhonePair on this iPhone in Developer Mode settings."];
-    if ([self.lastPhase isEqualToString:@"listening"]) {
-        self.statusDetail = @"Open Settings › Privacy & Security › Developer Mode and select “Pair with PhonePair on this iPhone”.";
-        [self refresh];
-    }
+    self.published = YES;
+    [self refresh];
 }
 
 - (void)netService:(NSNetService *)sender didNotPublish:(NSDictionary<NSString *, NSNumber *> *)errorDict {
@@ -438,8 +661,7 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
     pp_stop();
     [sender stop];
     self.service = nil;
-    self.statusTitleOverride = @"Local Network Unavailable";
-    self.statusDetail = @"Allow Local Network for PhonePair in Settings › Apps › PhonePair, then try again.";
+    self.problem = PPProblemLocalNetwork;
     [self refresh];
 }
 
@@ -456,7 +678,6 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
             else if ([phase isEqualToString:@"paired"] || [phase isEqualToString:@"verified"]) [haptics notificationOccurred:UINotificationFeedbackTypeSuccess];
         }
         if ([phase isEqualToString:@"verified"]) self.verified = YES;
-        if (!self.statusTitleOverride) self.statusDetail = message;
         [self appendLog:[NSString stringWithFormat:@"%@: %@", phase, message]];
         self.lastPhase = phase;
         self.lastMessage = message;
@@ -500,9 +721,10 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
 }
 
 - (void)verifyPairing {
+    self.verifyRequested = YES;
     self.verified = NO;
     self.exported = NO;
-    self.statusTitleOverride = nil;
+    self.problem = PPProblemNone;
     pp_verify(self.directory.UTF8String);
     [self poll];
 }
@@ -523,12 +745,14 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
 }
 
 - (void)enterForeground {
-    self.backgroundNote = PPBackgroundHint;
     [self poll];
     if (self.backgroundTask != UIBackgroundTaskInvalid) {
         [UIApplication.sharedApplication endBackgroundTask:self.backgroundTask];
         self.backgroundTask = UIBackgroundTaskInvalid;
     }
+    // Reset after polling: the app still reports the background state here, so polling first would bring the countdown back.
+    self.backgroundNote = PPBackgroundHint;
+    [self refresh];
 }
 
 - (void)exportPairingFrom:(UIView *)sourceView {
@@ -537,9 +761,9 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
     NSError *error;
     NSData *data = [NSData dataWithContentsOfFile:source options:0 error:&error];
     if (!data || ![data writeToURL:target options:NSDataWritingAtomic|NSDataWritingFileProtectionComplete error:&error]) {
-        self.statusTitleOverride = @"Couldn’t Export";
-        self.statusDetail = error.localizedDescription;
-        [self refresh];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Couldn’t Export" message:error.localizedDescription preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
         return;
     }
     UIActivityViewController *share = [[UIActivityViewController alloc] initWithActivityItems:@[target] applicationActivities:nil];
@@ -548,7 +772,7 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
     share.completionWithItemsHandler = ^(UIActivityType type, BOOL completed, NSArray *returnedItems, NSError *activityError) {
         if (!completed) return;
         self.exported = YES;
-        self.statusDetail = @"Import the file in StikDebug, then try enabling JIT.";
+        self.problem = PPProblemNone;
         [self appendLog:@"Pairing file exported."];
         [self refresh];
     };
@@ -567,6 +791,7 @@ static NSString *const PPBackgroundHint = @"Return to PhonePair promptly. iOS li
 @implementation PhonePairDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    self.window.tintColor = PPTint();
     UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:[PhonePairController new]];
     navigation.navigationBar.prefersLargeTitles = YES;
     navigation.view.tintColor = PPTint();
